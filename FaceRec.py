@@ -1,122 +1,72 @@
+import cv2
 import face_recognition
-import pickle
 import os
+import pickle
 
-# File to store face encodings and names
-ENCODINGS_FILE = "face_encodings.pkl"
+KNOWN_FACES_FILE = "known_faces.pkl"
 
-# Initialize known faces and names
-if os.path.exists(ENCODINGS_FILE):
-    with open(ENCODINGS_FILE, "rb") as file:
-        known_face_encodings, known_face_names = pickle.load(file)
-    print(f"Debug: Loaded {len(known_face_encodings)} known face encodings.")
-else:
-    known_face_encodings = []
-    known_face_names = []
-    print("Debug: No existing face encodings found. Starting fresh.")
+class FaceRecognizer:
+    def __init__(self):
+        self.known_faces = self.load_known_faces()
 
-def save_encodings():
-    """
-    Saves known face encodings and names to a file.
-    """
-    try:
-        with open(ENCODINGS_FILE, "wb") as file:
-            pickle.dump((known_face_encodings, known_face_names), file)
-        print(f"Debug: Saved {len(known_face_encodings)} face encodings to file.")
-    except Exception as e:
-        print(f"Error: Failed to save face encodings. {e}")
+    def load_known_faces(self):
+        if os.path.exists(KNOWN_FACES_FILE):
+            with open(KNOWN_FACES_FILE, "rb") as f:
+                return pickle.load(f)
+        return {"encodings": [], "names": []}
 
-def add_new_face(frame, name):
-    """
-    Adds a new face to the known encodings.
+    def save_known_faces(self):
+        with open(KNOWN_FACES_FILE, "wb") as f:
+            pickle.dump(self.known_faces, f)
 
-    Parameters:
-        frame (numpy array): A single frame from the video feed.
-        name (str): The name of the person associated with the face.
+    def recognize_and_track(self, on_frame=None):
+        video = cv2.VideoCapture(0)
+        print("Press 's' to save a new face, 'q' to quit.")
 
-    Returns:
-        bool: True if the face was added successfully, False otherwise.
-    """
-    try:
-        # Convert the frame from BGR (OpenCV format) to RGB
-        rgb_frame = frame[:, :, ::-1]  # Convert BGR to RGB
-        print(f"Debug: RGB frame shape: {rgb_frame.shape}, dtype: {rgb_frame.dtype}")
+        while True:
+            ret, frame = video.read()
+            if not ret:
+                break
 
-        # Detect face locations
-        face_locations = face_recognition.face_locations(rgb_frame)
-        print(f"Debug: Detected face locations - {face_locations}")
+            small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+            rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
 
-        if not face_locations:
-            print("No face detected. Ensure your face is clearly visible.")
-            return False
+            face_locations = face_recognition.face_locations(rgb_small_frame)
+            face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
 
-        # Validate the face_locations output
-        for loc in face_locations:
-            if len(loc) != 4 or not all(isinstance(coord, int) for coord in loc):
-                print(f"Error: Invalid face location format: {loc}")
-                return False
+            names = []
+            for face_encoding in face_encodings:
+                matches = face_recognition.compare_faces(self.known_faces["encodings"], face_encoding)
+                name = "Unknown"
+                if True in matches:
+                    best_match_index = matches.index(True)
+                    name = self.known_faces["names"][best_match_index]
+                names.append(name)
 
-        # Compute face encodings for the detected faces
-        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-        print(f"Debug: Found {len(face_encodings)} face encodings.")
+            # Draw rectangles
+            for (top, right, bottom, left), name in zip(face_locations, names):
+                top *= 4
+                right *= 4
+                bottom *= 4
+                left *= 4
+                cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
 
-        if face_encodings:
-            # Add the first face encoding and associated name
-            known_face_encodings.append(face_encodings[0])
-            known_face_names.append(name)
+            if on_frame:
+                on_frame(frame, names)
 
-            # Save encodings to the file
-            save_encodings()
+            cv2.imshow("Face Recognizer", frame)
+            key = cv2.waitKey(1) & 0xFF
 
-            print(f"Successfully added face for {name}.")
-            return True
-        else:
-            print("Error: No face encodings returned.")
-            return False
+            if key == ord("s") and face_encodings:
+                name = input("Enter name for the face: ")
+                self.known_faces["encodings"].append(face_encodings[0])
+                self.known_faces["names"].append(name)
+                self.save_known_faces()
+                print(f"Saved {name}'s face.")
 
-    except Exception as e:
-        print(f"Error while computing face encodings: {e}")
-        return False
+            elif key == ord("q"):
+                break
 
-
-def recognize_faces(frame):
-    """
-    Recognizes faces in the given frame.
-
-    Parameters:
-        frame (numpy array): A single frame from the video feed.
-
-    Returns:
-        list: List of tuples containing names and face locations.
-    """
-    rgb_frame = frame[:, :, ::-1]  # Convert BGR to RGB
-    face_locations = face_recognition.face_locations(rgb_frame)
-    print(f"Debug: Detected face locations - {face_locations}")
-
-    if not face_locations:
-        return []
-
-    try:
-        # Get face encodings for the detected faces
-        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-        print(f"Debug: Found {len(face_encodings)} face encodings.")
-    except Exception as e:
-        print(f"Error in face_encodings: {e}")
-        return []
-
-    recognized_faces = []
-    for face_encoding, (top, right, bottom, left) in zip(face_encodings, face_locations):
-        matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-        name = "Unknown"
-        print(f"Debug: Matches found - {matches}")
-
-        if True in matches:
-            match_index = matches.index(True)
-            name = known_face_names[match_index]
-            print(f"Debug: Recognized as {name}.")
-        else:
-            print("Debug: Face not recognized.")
-
-        recognized_faces.append((name, (top, right, bottom, left)))
-
-    return recognized_faces
+        video.release()
+        cv2.destroyAllWindows()
