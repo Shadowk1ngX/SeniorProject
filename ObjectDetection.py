@@ -7,6 +7,26 @@ class ObjectDetector:
         self.confidence_threshold = confidence_threshold
         self.cap = cv2.VideoCapture(0)
 
+
+
+    def process_frame(self, frame):
+        results = self.model(frame)[0]
+        for box in results.boxes:
+            conf = float(box.conf[0])
+            if conf < self.confidence_threshold:
+                continue
+
+            cls_id = int(box.cls[0])
+            label = self.model.names[cls_id]
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+            cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+        cv2.imshow("Object Detection", frame)
+        cv2.waitKey(1)
+        
     def detect_from_webcam(self, on_detect=None):
         while True:
             ret, frame = self.cap.read()
