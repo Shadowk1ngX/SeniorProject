@@ -1,16 +1,18 @@
 import cv2
+import numpy as np
 from ultralytics import YOLO
+from AssistantCore import update_objects
 
 class ObjectDetector:
-    def __init__(self, model_path="yolov8n.pt", confidence_threshold=0.5):
+    def __init__(self, model_path="yolov8n.pt", confidence_threshold=0.7, fast_mode=False):
         self.model = YOLO(model_path)
         self.confidence_threshold = confidence_threshold
-        self.cap = cv2.VideoCapture(0)
-
-
+        self.fast_mode = fast_mode
 
     def process_frame(self, frame):
         results = self.model(frame)[0]
+        labels_detected = []
+
         for box in results.boxes:
             conf = float(box.conf[0])
             if conf < self.confidence_threshold:
@@ -18,52 +20,37 @@ class ObjectDetector:
 
             cls_id = int(box.cls[0])
             label = self.model.names[cls_id]
+            labels_detected.append(label)
             x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-            cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-
-        cv2.imshow("Object Detection", frame)
-        cv2.waitKey(1)
-        
-    def detect_from_webcam(self, on_detect=None):
-        while True:
-            ret, frame = self.cap.read()
-            if not ret:
-                break
-
-            results = self.model(frame)[0]
-            detections = []
-
-            for box in results.boxes:
-                conf = float(box.conf[0])
-                if conf < self.confidence_threshold:
-                    continue
-
-                cls_id = int(box.cls[0])
-                label = self.model.names[cls_id]
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-
-                detection = {
-                    "label": label,
-                    "confidence": conf,
-                    "box": (x1, y1, x2, y2)
-                }
-                detections.append(detection)
-
-                # Draw on frame
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            if self.fast_mode:
+                #print(f"[Object] {label} ({conf:.2f})")
+                ...
+            else:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
                 cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-            # Optional callback to process detections
-            if on_detect:
-                on_detect(detections, frame)
+        update_objects(labels_detected)
 
-            cv2.imshow("YOLOv8 Detection", frame)
-            if cv2.waitKey(1) == ord('q'):
-                break
+        if not self.fast_mode:
+            cv2.imshow("Object Detection", frame)
+            cv2.waitKey(1)
 
-        self.cap.release()
-        cv2.destroyAllWindows()
+# === Multiprocessing Entry Point ===
+def detect_loop(shared_frame, lock, running):
+    print("[ObjectDetection] Object detector process started")
+    detector = ObjectDetector(confidence_threshold=0.5, fast_mode=True)
+
+    width, height = 640, 480  # match your camera resolution
+
+    while running.value:
+        with lock:
+            frame_data = shared_frame[:]
+        frame = bytearray(frame_data)
+        frame_np = cv2.imdecode(np.frombuffer(frame, dtype=np.uint8), cv2.IMREAD_COLOR)
+
+        if frame_np is not None:
+            detector.process_frame(frame_np)
+
+    print("[ObjectDetection] Object detector process stopping...")

@@ -1,62 +1,73 @@
 import ChatbotGpt as Chat
 import FaceRec as Face
 import ObjectDetection as Object
+import VoiceRec as Voice
 
-import threading
+import multiprocessing
 import cv2
 import time
+import numpy as np
 
-# Shared frame and lock
-shared_frame = None
-frame_lock = threading.Lock()
-running = True
-
-# Initialize webcam once
-cap = cv2.VideoCapture(0)
-
-def capture_frames():
-    global shared_frame, running
-    while running:
+def capture_and_share_frames(shared_frame, lock, running):
+    cap = cv2.VideoCapture(0)
+    while running.value:
         ret, frame = cap.read()
         if not ret:
             continue
-        with frame_lock:
-            shared_frame = frame.copy()
-        time.sleep(0.01)  # Optional: reduce CPU usage
+        with lock:
+            shared_frame[:] = frame.flatten()
+        time.sleep(0.03) #30 fps
+    cap.release()
 
-def run_face_recognizer():
-    global shared_frame, running
-    recognizer = Face.FaceRecognizer()
-    print("Face recognizer started")
-    while running:
-        with frame_lock:
-            frame = shared_frame.copy() if shared_frame is not None else None
-        if frame is not None:
-            recognizer.process_frame(frame)  # You’ll need to expose this
+def run_face_recognizer(shared_frame, lock, running):
+    import numpy as np
+    recognizer = Face.FaceRecognizer(fast_mode=True)
+    while running.value:
+        with lock:
+            frame_np = np.frombuffer(shared_frame.get_obj(), dtype=np.uint8).copy().reshape((480, 640, 3))
+        recognizer.process_frame(frame_np)
 
-def run_object_detector():
-    global shared_frame, running
-    detector = Object.ObjectDetector(confidence_threshold=0.5)
+
+def run_object_detector(shared_frame, lock, running):
+    detector = Object.ObjectDetector(confidence_threshold=0.7, fast_mode=True)
     print("Object detector started")
-    while running:
-        with frame_lock:
-            frame = shared_frame.copy() if shared_frame is not None else None
-        if frame is not None:
-            detector.process_frame(frame)  # You’ll need to expose this
+    while running.value:
+        with lock:
+            frame_np = np.frombuffer(shared_frame.get_obj(), dtype=np.uint8).copy().reshape((480, 640, 3))
+        detector.process_frame(frame_np)
+
+def start_voice_detection(running):
+    print("Voice recognition started")
+    Voice.listen_loop(running)  # Make sure this blocks or handles running flag
 
 if __name__ == "__main__":
-    capture_thread = threading.Thread(target=capture_frames)
-    face_thread = threading.Thread(target=run_face_recognizer)
-    object_thread = threading.Thread(target=run_object_detector)
+    multiprocessing.set_start_method("spawn")  # Better compatibility on Windows/macOS
 
-    capture_thread.start()
-    face_thread.start()
-    object_thread.start()
+    # Shared memory and lock
+    frame_shape = (480, 640, 3)  # adjust this to your camera's resolution
+    shared_array = multiprocessing.Array('B', frame_shape[0] * frame_shape[1] * frame_shape[2])
+    lock = multiprocessing.Lock()
+    running = multiprocessing.Value('b', True)
+
+    # Create processes
+    capture_proc = multiprocessing.Process(target=capture_and_share_frames, args=(shared_array, lock, running))
+    face_proc = multiprocessing.Process(target=run_face_recognizer, args=(shared_array, lock, running))
+    object_proc = multiprocessing.Process(target=run_object_detector, args=(shared_array, lock, running))
+    voice_proc = multiprocessing.Process(target=Voice.listen_loop, args=(running,))
+
+    # Start processes
+    voice_proc.start()
+    capture_proc.start()
+    face_proc.start()
+    object_proc.start()
 
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        running = False
-        cap.release()
+        running.value = False
         print("Shutting down...")
+
+    # Join processes
+    for proc in [voice_proc, capture_proc, face_proc, object_proc]:
+        proc.join()
