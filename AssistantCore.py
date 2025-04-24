@@ -2,7 +2,7 @@ import time
 import threading
 import cv2
 import numpy as np
-import face_recognition
+
 
 # This shared dictionary will be updated by face and object detectors
 assistant_state = {
@@ -68,7 +68,7 @@ def format_names(names):
     return people
 
 
-def handle_command(text, speak_fn, gpt_instance=None, assistant_state=None, lock=None, shared_frame=None, frame_lock=None):
+def handle_command(text, gpt_instance=None, assistant_state=None, lock=None, shared_frame=None, frame_lock=None, tts_queue = None):
 
     with lock:
         #print("Current people seen:", assistant_state["people_seen"])
@@ -80,7 +80,7 @@ def handle_command(text, speak_fn, gpt_instance=None, assistant_state=None, lock
     if "who" in text and ("here" in text or "see" in text):
         with lock:
             text = format_names(assistant_state["people_seen"])
-        speak_fn(f"I see {text}.")
+        tts_queue.put(f"I see {text}.")
         return
 
     # “What do you see?”
@@ -92,14 +92,14 @@ def handle_command(text, speak_fn, gpt_instance=None, assistant_state=None, lock
                 f"What do you see in this image?",
                 image_path=image_path
             )
-            speak_fn(desc)
+            tts_queue.put(desc)
         else:
-            speak_fn("I’m having trouble seeing right now.")
+            tts_queue.put("I’m having trouble seeing right now.")
         return
 
     # Fallback to GPT-powered chat
     if gpt_instance:
         response = gpt_instance.get_gpt_chat_response(text)
-        speak_fn(response)
+        tts_queue.put(response)
     else:
-        speak_fn("I’m not sure how to respond to that.")
+        tts_queue.put("I’m not sure how to respond to that.")

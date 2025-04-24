@@ -9,11 +9,12 @@ from AssistantCore import update_faces
 import VoiceRec as Voice
 import Sounds
 
+
 KNOWN_FACES_FILE = "known_faces.pkl"
 
 
 
-def face_loop(shared_frame, lock, running, assistant_state, state_lock):
+def face_loop(shared_frame, lock, running, assistant_state, state_lock,tts_queue):
     recognizer = FaceRecognizer(fast_mode=False)
     name_prompt_delay = 10.0
     first_unknown_time = None
@@ -53,20 +54,20 @@ def face_loop(shared_frame, lock, running, assistant_state, state_lock):
                 Name = ""
 
                 while not name_confirmed:
-                    Voice.speak("I don’t recognize you. What’s your name?")
+                    tts_queue.put("I don’t recognize you. What’s your name?")
                     Sounds.play_sound("ActiveRecordSound.mp3")
-                    Recording = Voice.record_until_silence()
+                    Recording = Voice.record_until_silence(tts_queue)
                     Sounds.play_sound("EndRecordSound.mp3")
                     wav_path = Voice.save_temp_wav(Recording)
                     Name = Voice.transcribe_audio(wav_path, LimitCheck=False).strip()
 
                     if not Name or len(Name.split()) > 4:
-                        Voice.speak("Sorry, I didn't catch that.")
+                        tts_queue.put("Sorry, I didn't catch that.")
                         continue
                     
-                    Voice.speak(f"Your name is {Name}. Is that correct?")
+                    tts_queue.put(f"Your name is {Name}. Is that correct?")
                     Sounds.play_sound("ActiveRecordSound.mp3")
-                    ConfirmationRecording = Voice.record_until_silence()
+                    ConfirmationRecording = Voice.record_until_silence(tts_queue)
                     Sounds.play_sound("EndRecordSound.mp3")
                     ConfirmationWav_path = Voice.save_temp_wav(ConfirmationRecording)
                     ConfirmationText = Voice.transcribe_audio(ConfirmationWav_path, LimitCheck=False).lower()
@@ -74,23 +75,23 @@ def face_loop(shared_frame, lock, running, assistant_state, state_lock):
                     if "yes" in ConfirmationText or "correct" in ConfirmationText or "yeah" in ConfirmationText or "incorrect" in ConfirmationText:
                         name_confirmed = True
                     elif "no" in ConfirmationText:
-                        Voice.speak("Alright, let's try again.")
+                        tts_queue.put("Alright, let's try again.")
                     else:
-                        Voice.speak("I didn't understand that. Please say yes or no.")
+                        tts_queue.put("I didn't understand that. Please say yes or no.")
 
                 # 🧠 Register only if name is confirmed
                 success = recognizer.register_face(frame, Name)
                 if success:
                     first_unknown_time = None
                     print("✅ Registered new face for", Name)
-                    Voice.speak(f"Thanks, {Name}. I’ll remember you.")
+                    tts_queue.put(f"Thanks, {Name}. I’ll remember you.")
                     recognizer.known_faces = recognizer.load_known_faces()
                     # Optional: Add to seen list here
                     # with state_lock:
                     #     assistant_state["people_seen"].append(Name)
                 else:
                     print("❌ Failed to register face; no encoding found.")
-                    Voice.speak("Sorry, I couldn’t see your face clearly—let’s try again.")
+                    tts_queue.put("Sorry, I couldn’t see your face clearly—let’s try again.")
                     first_unknown_time = None  # Reset timer so it’ll re-prompt later
 
 
