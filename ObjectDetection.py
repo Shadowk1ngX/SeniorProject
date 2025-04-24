@@ -8,6 +8,7 @@ class ObjectDetector:
         self.model = YOLO(model_path)
         self.confidence_threshold = confidence_threshold
         self.fast_mode = fast_mode
+        self.model.overrides['verbose'] = False
 
     def process_frame(self, frame):
         results = self.model(frame)[0]

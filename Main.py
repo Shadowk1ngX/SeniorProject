@@ -2,6 +2,7 @@ import ChatbotGpt as Chat
 import FaceRec as Face
 import ObjectDetection as Object
 import VoiceRec as Voice
+from AssistantCore import update_faces
 
 import multiprocessing
 import cv2
@@ -19,29 +20,44 @@ def capture_and_share_frames(shared_frame, lock, running):
         time.sleep(0.03) #30 fps
     cap.release()
 
-def run_face_recognizer(shared_frame, lock, running):
-    import numpy as np
-    recognizer = Face.FaceRecognizer(fast_mode=True)
+def run_face_recognizer(shared_frame, frame_lock, running,assistant_state, state_lock):
+    #recognizer = Face.FaceRecognizer(fast_mode=True)
     while running.value:
-        with lock:
-            frame_np = np.frombuffer(shared_frame.get_obj(), dtype=np.uint8).copy().reshape((480, 640, 3))
-        recognizer.process_frame(frame_np)
+        Face.face_loop(shared_frame, frame_lock, running,assistant_state, state_lock)
+        #with frame_lock:
+            #raw = shared_frame.get_obj()
+            #frame = np.frombuffer(raw, dtype=np.uint8).reshape((480,640,3))
+        #names = recognizer.process_frame(frame)
+        #update_faces(names, assistant_state, state_lock)
 
 
-def run_object_detector(shared_frame, lock, running):
-    detector = Object.ObjectDetector(confidence_threshold=0.7, fast_mode=True)
-    print("Object detector started")
-    while running.value:
-        with lock:
-            frame_np = np.frombuffer(shared_frame.get_obj(), dtype=np.uint8).copy().reshape((480, 640, 3))
-        detector.process_frame(frame_np)
+#def run_object_detector(shared_frame, lock, running):
+ #   detector = Object.ObjectDetector(confidence_threshold=0.7, fast_mode=True)
+  #  print("Object detector started")
+   # while running.value:
+   #     with lock:
+   #         frame_np = np.frombuffer(shared_frame.get_obj(), dtype=np.uint8).copy().reshape((480, 640, 3))
+   #     detector.process_frame(frame_np)
 
 def start_voice_detection(running):
     print("Voice recognition started")
     Voice.listen_loop(running)  # Make sure this blocks or handles running flag
 
+
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn")  # Better compatibility on Windows/macOS
+
+    manager = multiprocessing.Manager()
+    assistant_state = manager.dict({
+        "people_seen": manager.list(),
+        "objects_detected": manager.list(),
+        "in_command": False,
+        "awaiting_name": False,
+        "awaiting_confirmation": False,
+        "pending_face_frame": None,
+    })
+
+    state_lock = multiprocessing.Lock()
 
     # Shared memory and lock
     frame_shape = (480, 640, 3)  # adjust this to your camera's resolution
@@ -51,15 +67,15 @@ if __name__ == "__main__":
 
     # Create processes
     capture_proc = multiprocessing.Process(target=capture_and_share_frames, args=(shared_array, lock, running))
-    face_proc = multiprocessing.Process(target=run_face_recognizer, args=(shared_array, lock, running))
-    object_proc = multiprocessing.Process(target=run_object_detector, args=(shared_array, lock, running))
-    voice_proc = multiprocessing.Process(target=Voice.listen_loop, args=(running,))
+    face_proc = multiprocessing.Process(target=run_face_recognizer, args=(shared_array, lock, running, assistant_state,state_lock))
+    #object_proc = multiprocessing.Process(target=run_object_detector, args=(shared_array, lock, running)) #REmove Object since gpt can do it
+    voice_proc = multiprocessing.Process(target=Voice.listen_loop, args=(running,assistant_state,state_lock,shared_array,lock))
 
     # Start processes
-    voice_proc.start()
     capture_proc.start()
+    voice_proc.start()
     face_proc.start()
-    object_proc.start()
+    #object_proc.start()
 
     try:
         while True:
@@ -69,5 +85,9 @@ if __name__ == "__main__":
         print("Shutting down...")
 
     # Join processes
-    for proc in [voice_proc, capture_proc, face_proc, object_proc]:
+    for proc in [voice_proc, capture_proc, face_proc]:#, object_proc]: 
         proc.join()
+
+    #FIX FACE REC DATA SHARE
+
+    

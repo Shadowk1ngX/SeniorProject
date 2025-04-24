@@ -8,9 +8,12 @@ import tempfile
 import numpy as np
 import time
 import pyttsx3
+import webrtcvad
 from datetime import datetime
 from AssistantCore import handle_command
 import ChatbotGpt
+import Sounds
+import os
 
 # === Load Access Key ===
 with open('Key.json', 'r') as file:
@@ -27,13 +30,12 @@ tts = pyttsx3.init()
 gpt = ChatbotGpt.ChatbotGPT()
 
 # === Audio Config ===
-CHUNK = 1024
+CHUNK_DURATION_MS = 30  # must be 10, 20, or 30 for webrtcvad
+RATE = 16000
+CHUNK = int(RATE * CHUNK_DURATION_MS / 1000)  # = 480
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
-RATE = 16000
 MAX_RECORD_SECONDS = 30
-SILENCE_THRESHOLD = 500
-SILENCE_DURATION = 2
 
 # PyAudio setup
 pa = pyaudio.PyAudio()
@@ -43,14 +45,10 @@ def speak(text):
     tts.say(text)
     tts.runAndWait()
 
-def rms(data):
-    shorts = np.frombuffer(data, dtype=np.int16)
-    if len(shorts) == 0:
-        return 0
-    return np.sqrt(np.mean(shorts.astype(np.float32) ** 2))
-
 def record_until_silence():
-    print("🎤 Listening for your command (max 30s)...")
+    print("🎤 Listening for your command (VAD enabled)...")
+
+    vad = webrtcvad.Vad(3)  # 0–3: higher = more aggressive (cuts noise better)
 
     record_stream = pa.open(
         format=FORMAT,
@@ -64,32 +62,34 @@ def record_until_silence():
     start_time = time.time()
     last_voice_time = time.time()
     grace_start = time.time()
-    GRACE_PERIOD = 5
+    GRACE_PERIOD = 5  # Max time allowed before user starts speaking
     user_started_speaking = False
 
     while True:
         data = record_stream.read(CHUNK, exception_on_overflow=False)
         frames.append(data)
-        volume = rms(data)
-        #print(f"Volume: {volume}")
 
+        is_speaking = vad.is_speech(data, RATE)
         current_time = time.time()
 
-        if volume > SILENCE_THRESHOLD:
+        # Optional visual debug
+        print("🎙️ Speaking" if is_speaking else "…", end="\r")
+
+        if is_speaking:
             last_voice_time = current_time
             user_started_speaking = True
 
         if not user_started_speaking and current_time - grace_start > GRACE_PERIOD:
-            print("😐 No speech detected during grace period, stopping...")
+            print("\n😐 No speech detected during grace period, stopping...")
             speak("I didn't hear anything.")
             break
 
-        if user_started_speaking and current_time - last_voice_time > SILENCE_DURATION:
-            print("🤫 Silence detected, stopping...")
+        if user_started_speaking and current_time - last_voice_time > 1.0:
+            print("\n🤫 Silence detected, stopping...")
             break
 
         if current_time - start_time > MAX_RECORD_SECONDS:
-            print("⏰ Max time reached, stopping...")
+            print("\n⏰ Max time reached, stopping...")
             break
 
     record_stream.stop_stream()
@@ -107,14 +107,21 @@ def save_temp_wav(audio_data):
         wf.close()
         return tmpfile.name
 
-def transcribe_audio(file_path):
+def transcribe_audio(file_path,LimitCheck = True):
     print("🧠 Transcribing with Whisper...")
     result = whisper_model.transcribe(file_path)
     text = result["text"].strip()
     print("📝 Text:", text)
+
+    # Filter out empty or nonsense transcripts
+    if LimitCheck:
+        if len(text.split()) < 2:
+            print("🤫 Likely noise or too short to be valid.")
+            return ""
+
     return text
 
-def listen_loop(running):
+def listen_loop(running, assistant_state=None, state_lock=None, shared_frame=None, frame_lock=None):
     print("🧠 listen_loop() was called")
 
     try:
@@ -138,13 +145,19 @@ def listen_loop(running):
 
         keyword_index = porcupine.process(pcm)
         if keyword_index >= 0:
+            assistant_state["in_command"] = True
+            print("VOICE")
             print("✅ Wake word detected!")
             speak("How can I help?")
+            Sounds.play_sound("ActiveRecordSound.mp3")
             command_audio = record_until_silence()
+            Sounds.play_sound("EndRecordSound.mp3")
             wav_path = save_temp_wav(command_audio)
             text = transcribe_audio(wav_path)
             if text:
-                handle_command(text, speak, gpt_instance=gpt)
+                handle_command(text, speak, gpt_instance=gpt, assistant_state=assistant_state, lock=state_lock,shared_frame=shared_frame, frame_lock=frame_lock)
+
+            assistant_state["in_command"] = False
             print("🎤 Listening for wake word again...")
 
     print("🛑 Stopping voice assistant...")
