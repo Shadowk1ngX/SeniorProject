@@ -2,6 +2,7 @@ import time
 import threading
 import cv2
 import numpy as np
+import datetime
 
 
 # This shared dictionary will be updated by face and object detectors
@@ -75,6 +76,9 @@ def handle_command(text, gpt_instance=None, assistant_state=None, lock=None, sha
         text = text.lower().strip()
     with lock:
         assistant_state["last_command"] = text
+
+   # if "what" in text and "time" in text:
+     #   Time = time.localtime()
 
     # “Who’s here?”
     if "who" in text and ("here" in text or "see" in text):

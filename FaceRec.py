@@ -4,7 +4,6 @@ import os
 import pickle
 import time
 import numpy as np
-import AssistantCore
 from AssistantCore import update_faces
 import VoiceRec as Voice
 import Sounds
@@ -56,6 +55,9 @@ def face_loop(shared_frame, lock, running, assistant_state, state_lock,tts_queue
                 while not name_confirmed:
                     tts_queue.put("I don’t recognize you. What’s your name?")
                     Sounds.play_sound("ActiveRecordSound.mp3")
+                    print("SLEEP")
+                    time.sleep(2)
+                    print("Sleep End")
                     Recording = Voice.record_until_silence(tts_queue)
                     Sounds.play_sound("EndRecordSound.mp3")
                     wav_path = Voice.save_temp_wav(Recording)
@@ -67,6 +69,7 @@ def face_loop(shared_frame, lock, running, assistant_state, state_lock,tts_queue
                     
                     tts_queue.put(f"Your name is {Name}. Is that correct?")
                     Sounds.play_sound("ActiveRecordSound.mp3")
+                    time.sleep(1.5)
                     ConfirmationRecording = Voice.record_until_silence(tts_queue)
                     Sounds.play_sound("EndRecordSound.mp3")
                     ConfirmationWav_path = Voice.save_temp_wav(ConfirmationRecording)

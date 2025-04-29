@@ -11,7 +11,6 @@ from multiprocessing import Queue
 from TtsProcess import tts_loop
 
 
-
 def capture_and_share_frames(shared_frame, lock, running):
     cap = cv2.VideoCapture(0)
     while running.value:

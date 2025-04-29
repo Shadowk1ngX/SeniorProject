@@ -7,16 +7,12 @@ import wave
 import tempfile
 import numpy as np
 import time
-import pyttsx3
 import webrtcvad
 from datetime import datetime
 from AssistantCore import handle_command
 import ChatbotGpt
 import Sounds
-import os
-import queue
-import threading
-import pyttsx3
+
 
 
 # === Load Access Key ===
@@ -158,10 +154,9 @@ def listen_loop(running, assistant_state=None, state_lock=None, shared_frame=Non
             print("✅ Wake word detected!")
             tts_queue.put("How can I help?")
             time.sleep(1.2)
-
-            #Sounds.play_sound("ActiveRecordSound.mp3")
+            Sounds.play_sound("ActiveRecordSound.mp3")
             command_audio = record_until_silence(tts_queue)
-            #Sounds.play_sound("EndRecordSound.mp3")
+            Sounds.play_sound("EndRecordSound.mp3")
             wav_path = save_temp_wav(command_audio)
             text = transcribe_audio(wav_path)
             if text:
