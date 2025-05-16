@@ -3,7 +3,6 @@ import FaceRec as Face
 import ObjectDetection as Object
 import VoiceRec as Voice
 from AssistantCore import update_faces
-import multiprocessing
 import cv2
 import time
 import numpy as np
